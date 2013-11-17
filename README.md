@@ -1,3 +1,68 @@
+
+# Accumulo Pig Integration
+
+The official support site for accumulo-pig is at http://people.apache.org/~elserj/accumulo-pig/. I'm fooling around
+Jason's code inside this project. Please checkout the official project.
+
+2013-Nov-16 - I updated Jason's code to work with Accumulo 1.5.0. It is fairly trivial to experiment with 
+Pig and Accumulo using my Vagrant boxes. 
+
+## Start an Accumulo Cluster
+
+Start an Accumulo cluster using https://github.com/medined/Accumulo_1_5_0_By_Vagrant.
+ 
+## Install Pig on the Accumulo Master
+
+```
+vagrant ssh master
+cd /home/vagrant/accumulo_home/bin
+tar xvfz /vagrant/files/pig-0.12.0.tar.gz
+export PATH=/home/vagrant/accumulo_home/bin/pig-0.12.0/bin:$PATH
+```
+
+## Download and Compile Accumulo-Pig
+
+```
+cd /home/vagrant/accumulo_home/software
+git clone https://github.com/medined/accumulo-pig
+cd accumulo-pig
+mvn package
+```
+
+## Create some data in Accumulo
+
+```
+accumulo shell -u root -p secret
+createtable people
+insert id101 attribute height 45
+insert id101 attribute weight 123
+insert id102 attribute height 23
+insert id102 attribute weight 435
+insert id102 text "" "Now is the time for all ..."
+exit
+```
+
+## Use Pig to Read Accumulo
+
+```
+pig
+register /home/vagrant/accumulo_home/bin/accumulo/lib/accumulo-core.jar
+register /home/vagrant/accumulo_home/bin/accumulo/lib/accumulo-fate.jar
+register /home/vagrant/accumulo_home/bin/accumulo/lib/accumulo-trace.jar
+register /home/vagrant/accumulo_home/bin/accumulo/lib/libthrift.jar
+register /home/vagrant/accumulo_home/bin/zookeeper/zookeeper-3.4.5.jar
+register /vagrant/accumulo-pig/target/accumulo-pig-1.4.0.jar
+DATA = LOAD 'accumulo://people?instance=instance&user=root&password=secret&zookeepers=affy-master:2181&columns=attribute' using org.apache.accumulo.pig.AccumuloStorage() AS (row, cf, cq, cv, ts, val);
+HEIGHTS = FOREACH DATA GENERATE row, cq, val;
+SORTED_SET = ORDER HEIGHTS BY val DESC;
+dump SORTED_SET;
+```
+
+
+
+
+
+
 build the JAR (Note, you will need to download the accumulo src, build it, and install it into your maven repo before this will work)
 
     mvn package
