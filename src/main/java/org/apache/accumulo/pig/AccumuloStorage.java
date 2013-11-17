@@ -5,9 +5,9 @@
  * licenses this file to you under the Apache License, Version 2.0 (the
  * "License"); you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
- * 
+ *
  * http://www.apache.org/licenses/LICENSE-2.0
- * 
+ *
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
  * WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the
@@ -27,6 +27,7 @@ import org.apache.accumulo.core.security.ColumnVisibility;
 import org.apache.commons.logging.Log;
 import org.apache.commons.logging.LogFactory;
 import org.apache.hadoop.io.Text;
+import org.apache.hadoop.mapreduce.Job;
 import org.apache.pig.backend.executionengine.ExecException;
 import org.apache.pig.data.DataByteArray;
 import org.apache.pig.data.Tuple;
@@ -35,23 +36,24 @@ import org.apache.pig.data.TupleFactory;
 /**
  * A LoadStoreFunc for retrieving data from and storing data to Accumulo
  *
- * A Key/Val pair will be returned as tuples: (key, colfam, colqual, colvis, timestamp, value). All fields except timestamp are DataByteArray, timestamp is a long.
- * 
- * Tuples can be written in 2 forms:
- *  (key, colfam, colqual, colvis, value)
- *    OR
- *  (key, colfam, colqual, value)
- * 
+ * A Key/Val pair will be returned as tuples: (key, colfam, colqual, colvis,
+ * timestamp, value). All fields except timestamp are DataByteArray, timestamp
+ * is a long.
+ *
+ * Tuples can be written in 2 forms: (key, colfam, colqual, colvis, value) OR
+ * (key, colfam, colqual, value)
+ *
  */
-public class AccumuloStorage extends AbstractAccumuloStorage
-{
+public class AccumuloStorage extends AbstractAccumuloStorage {
+
     private static final Log LOG = LogFactory.getLog(AccumuloStorage.class);
 
-    public AccumuloStorage(){}
+    public AccumuloStorage() {
+    }
 
-	@Override
-	protected Tuple getTuple(Key key, Value value) throws IOException {
-		// and wrap it in a tuple
+    @Override
+    protected Tuple getTuple(Key key, Value value) throws IOException {
+        // and wrap it in a tuple
         Tuple tuple = TupleFactory.getInstance().newTuple(6);
         tuple.set(0, new DataByteArray(key.getRow().getBytes()));
         tuple.set(1, new DataByteArray(key.getColumnFamily().getBytes()));
@@ -60,33 +62,32 @@ public class AccumuloStorage extends AbstractAccumuloStorage
         tuple.set(4, new Long(key.getTimestamp()));
         tuple.set(5, new DataByteArray(value.get()));
         return tuple;
-	}
-	
-	@Override
-	public Collection<Mutation> getMutations(Tuple tuple) throws ExecException, IOException {
-		Mutation mut = new Mutation(Utils.objToText(tuple.get(0)));
+    }
+
+    @Override
+    public Collection<Mutation> getMutations(Tuple tuple) throws ExecException, IOException {
+        Mutation mut = new Mutation(Utils.objToText(tuple.get(0)));
         Text cf = Utils.objToText(tuple.get(1));
-    	Text cq = Utils.objToText(tuple.get(2));
-    	
-        if(tuple.size() > 4)
-        {
-        	Text cv = Utils.objToText(tuple.get(3));
-        	Value val = new Value(Utils.objToBytes(tuple.get(4)));
-        	if(cv.getLength() == 0)
-        	{
-        		mut.put(cf, cq, val);
-        	}
-        	else
-        	{
-        		mut.put(cf, cq, new ColumnVisibility(cv), val);
-        	}
+        Text cq = Utils.objToText(tuple.get(2));
+
+        if (tuple.size() > 4) {
+            Text cv = Utils.objToText(tuple.get(3));
+            Value val = new Value(Utils.objToBytes(tuple.get(4)));
+            if (cv.getLength() == 0) {
+                mut.put(cf, cq, val);
+            } else {
+                mut.put(cf, cq, new ColumnVisibility(cv), val);
+            }
+        } else {
+            Value val = new Value(Utils.objToBytes(tuple.get(3)));
+            mut.put(cf, cq, val);
         }
-        else
-        {
-        	Value val = new Value(Utils.objToBytes(tuple.get(3)));
-        	mut.put(cf, cq, val);
-        }
-        
+
         return Collections.singleton(mut);
-	}
+    }
+
+    @Override
+    public void cleanupOnSuccess(String string, Job job) throws IOException {
+        // don't do anyhing.
+    }
 }

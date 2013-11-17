@@ -5,9 +5,9 @@
  * licenses this file to you under the Apache License, Version 2.0 (the
  * "License"); you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
- * 
+ *
  * http://www.apache.org/licenses/LICENSE-2.0
- * 
+ *
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
  * WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the
@@ -21,9 +21,16 @@ import java.util.Collection;
 import java.util.Collections;
 import java.util.LinkedList;
 import java.util.List;
+import java.util.concurrent.TimeUnit;
+import java.util.logging.Level;
+import java.util.logging.Logger;
+import org.apache.accumulo.core.client.AccumuloSecurityException;
+import org.apache.accumulo.core.client.BatchWriterConfig;
 
 import org.apache.accumulo.core.client.mapreduce.AccumuloInputFormat;
 import org.apache.accumulo.core.client.mapreduce.AccumuloOutputFormat;
+import org.apache.accumulo.core.client.mapreduce.lib.util.ConfiguratorBase;
+import org.apache.accumulo.core.client.security.tokens.PasswordToken;
 import org.apache.accumulo.core.data.Key;
 import org.apache.accumulo.core.data.Mutation;
 import org.apache.accumulo.core.data.Range;
@@ -50,22 +57,20 @@ import org.apache.pig.data.Tuple;
 /**
  * A LoadStoreFunc for retrieving data from and storing data to Accumulo
  *
- * A Key/Val pair will be returned as tuples: (key, colfam, colqual, colvis, timestamp, value). All fields except timestamp are DataByteArray, timestamp is a long.
- * 
- * Tuples can be written in 2 forms:
- *  (key, colfam, colqual, colvis, value)
- *    OR
- *  (key, colfam, colqual, value)
- * 
+ * A Key/Val pair will be returned as tuples: (key, colfam, colqual, colvis,
+ * timestamp, value). All fields except timestamp are DataByteArray, timestamp
+ * is a long.
+ *
+ * Tuples can be written in 2 forms: (key, colfam, colqual, colvis, value) OR
+ * (key, colfam, colqual, value)
+ *
  */
-public abstract class AbstractAccumuloStorage extends LoadFunc implements StoreFuncInterface
-{
-    private static final Log LOG = LogFactory.getLog(AbstractAccumuloStorage.class);
+public abstract class AbstractAccumuloStorage extends LoadFunc implements StoreFuncInterface {
 
+    private static final Log LOG = LogFactory.getLog(AbstractAccumuloStorage.class);
     private Configuration conf;
     private RecordReader<Key, Value> reader;
     private RecordWriter<Text, Mutation> writer;
-    
     String inst;
     String zookeepers;
     String user;
@@ -74,229 +79,221 @@ public abstract class AbstractAccumuloStorage extends LoadFunc implements StoreF
     Text tableName;
     String auths;
     Authorizations authorizations;
-    List<Pair<Text, Text>> columnFamilyColumnQualifierPairs = new LinkedList<Pair<Text,Text>>();
-    
+    List<Pair<Text, Text>> columnFamilyColumnQualifierPairs = new LinkedList<Pair<Text, Text>>();
     String start = null;
     String end = null;
-    
     int maxWriteThreads = 10;
-    long maxMutationBufferSize = 10*1000*1000;
-    int maxLatency = 10*1000;
+    long maxMutationBufferSize = 10 * 1000 * 1000;
+    int maxLatency = 10 * 1000;
 
-    public AbstractAccumuloStorage(){}
+    public AbstractAccumuloStorage() {
+    }
 
-	@Override
-    public Tuple getNext() throws IOException
-    {
-        try
-        {
+    @Override
+    public Tuple getNext() throws IOException {
+        try {
             // load the next pair
-            if (!reader.nextKeyValue())
+            if (!reader.nextKeyValue()) {
                 return null;
-            
-            Key key = (Key)reader.getCurrentKey();
-            Value value = (Value)reader.getCurrentValue();
+            }
+
+            Key key = (Key) reader.getCurrentKey();
+            Value value = (Value) reader.getCurrentValue();
             assert key != null && value != null;
             return getTuple(key, value);
-        }
-        catch (InterruptedException e)
-        {
+        } catch (InterruptedException e) {
             throw new IOException(e.getMessage());
         }
     }
-	
-	protected abstract Tuple getTuple(Key key, Value value) throws IOException;
-	
+
+    protected abstract Tuple getTuple(Key key, Value value) throws IOException;
 
     @Override
-    public InputFormat getInputFormat()
-    {
+    public InputFormat getInputFormat() {
+        LOG.fatal("AbstractAccumuloStorage getInputFormat");
         return new AccumuloInputFormat();
     }
 
+    @SuppressWarnings("unchecked")
     @Override
-    public void prepareToRead(RecordReader reader, PigSplit split)
-    {
+    public void prepareToRead(RecordReader reader, PigSplit split) {
+        LOG.fatal("AbstractAccumuloStorage prepareToRead");
         this.reader = reader;
     }
 
-    private void setLocationFromUri(String location) throws IOException
-    {
+    private void setLocationFromUri(String location) throws IOException {
         // ex: accumulo://table1?instance=myinstance&user=root&password=secret&zookeepers=127.0.0.1:2181&auths=PRIVATE,PUBLIC&columns=col1|cq1,col2|cq2&start=abc&end=z
         String columns = "";
-        try
-        {
-            if (!location.startsWith("accumulo://"))
+        try {
+            if (!location.startsWith("accumulo://")) {
                 throw new Exception("Bad scheme.");
+            }
             String[] urlParts = location.split("\\?");
-            if (urlParts.length > 1)
-            {
-                for (String param : urlParts[1].split("&"))
-                {
+            if (urlParts.length > 1) {
+                for (String param : urlParts[1].split("&")) {
                     String[] pair = param.split("=");
-                    if (pair[0].equals("instance"))
+                    if (pair[0].equals("instance")) {
                         inst = pair[1];
-                    else if (pair[0].equals("user"))
+                    } else if (pair[0].equals("user")) {
                         user = pair[1];
-                    else if (pair[0].equals("password"))
+                    } else if (pair[0].equals("password")) {
                         password = pair[1];
-                    else if (pair[0].equals("zookeepers"))
-                    	zookeepers = pair[1];
-                    else if (pair[0].equals("auths"))
-                    	auths = pair[1];
-                    else if (pair[0].equals("columns"))
-                    	columns = pair[1];
-                    else if (pair[0].equals("start"))
-                    	start = pair[1];
-                    else if (pair[0].equals("end"))
-                    	end = pair[1];
-                    else if (pair[0].equals("write_buffer_size_bytes"))
-                    	maxMutationBufferSize = Long.parseLong(pair[1]);
-                    else if (pair[0].equals("write_threads"))
-                    	maxWriteThreads = Integer.parseInt(pair[1]);
-                    else if (pair[0].equals("write_latency_ms"))
-                    	maxLatency = Integer.parseInt(pair[1]);
+                    } else if (pair[0].equals("zookeepers")) {
+                        zookeepers = pair[1];
+                    } else if (pair[0].equals("auths")) {
+                        auths = pair[1];
+                    } else if (pair[0].equals("columns")) {
+                        columns = pair[1];
+                    } else if (pair[0].equals("start")) {
+                        start = pair[1];
+                    } else if (pair[0].equals("end")) {
+                        end = pair[1];
+                    } else if (pair[0].equals("write_buffer_size_bytes")) {
+                        maxMutationBufferSize = Long.parseLong(pair[1]);
+                    } else if (pair[0].equals("write_threads")) {
+                        maxWriteThreads = Integer.parseInt(pair[1]);
+                    } else if (pair[0].equals("write_latency_ms")) {
+                        maxLatency = Integer.parseInt(pair[1]);
+                    }
                 }
             }
             String[] parts = urlParts[0].split("/+");
             table = parts[1];
             tableName = new Text(table);
-            
-            if(auths == null || auths.equals(""))
-            {
-            	authorizations = new Authorizations();
+
+            if (auths == null || auths.equals("")) {
+                authorizations = new Authorizations();
+            } else {
+                authorizations = new Authorizations(auths.split(","));
             }
-            else
-            {
-            	authorizations = new Authorizations(auths.split(","));
+
+            if (!columns.equals("")) {
+                for (String cfCq : columns.split(",")) {
+                    if (cfCq.contains("|")) {
+                        String[] c = cfCq.split("\\|");
+                        columnFamilyColumnQualifierPairs.add(new Pair<Text, Text>(new Text(c[0]), new Text(c[1])));
+                    } else {
+                        columnFamilyColumnQualifierPairs.add(new Pair<Text, Text>(new Text(cfCq), null));
+                    }
+                }
             }
-            
-            if(!columns.equals("")){
-            	for(String cfCq : columns.split(","))
-            	{
-            		if(cfCq.contains("|"))
-            		{
-            			String[] c = cfCq.split("\\|");
-            			columnFamilyColumnQualifierPairs.add(new Pair<Text, Text>(new Text(c[0]), new Text(c[1])));
-            		}
-            		else
-            		{
-            			columnFamilyColumnQualifierPairs.add(new Pair<Text, Text>(new Text(cfCq), null));
-            		}
-            	}
-            }
-            	
-        }
-        catch (Exception e)
-        {
-            throw new IOException("Expected 'accumulo://<table>[?instance=<instanceName>&user=<user>&password=<password>&zookeepers=<zookeepers>&auths=<authorizations>&" +
-            						"[start=startRow,end=endRow,columns=[cf1|cq1,cf2|cq2,...],write_buffer_size_bytes=10000000,write_threads=10,write_latency_ms=30000]]': " + e.getMessage());
+
+        } catch (Exception e) {
+            throw new IOException(String.format("Expected 'accumulo://<table>[?instance=<instanceName>&user=<user>&password=<password>&zookeepers=<zookeepers>&auths=<authorizations>&[start=startRow,end=endRow,columns=[cf1|cq1,cf2|cq2,...],write_buffer_size_bytes=10000000,write_threads=10,write_latency_ms=30000]]': %s", e.getMessage()));
         }
     }
-    
+
     protected RecordWriter<Text, Mutation> getWriter() {
-		return writer;
-	}
-    
+        return writer;
+    }
+
     @Override
-    public void setLocation(String location, Job job) throws IOException
-    {
+    public void setLocation(String location, Job job) throws IOException {
+        LOG.fatal("AbstractAccumuloStorage setLocation");
         conf = job.getConfiguration();
+        
         setLocationFromUri(location);
         
-        if(!conf.getBoolean(AccumuloInputFormat.class.getSimpleName()+".configured", false))
-        {
-        	AccumuloInputFormat.setInputInfo(conf, user, password.getBytes(), table, authorizations);
-            AccumuloInputFormat.setZooKeeperInstance(conf, inst, zookeepers);
-            if(columnFamilyColumnQualifierPairs.size() > 0)
-            {
-            	LOG.info("columns: "+columnFamilyColumnQualifierPairs);
-            	AccumuloInputFormat.fetchColumns(conf, columnFamilyColumnQualifierPairs);
+        if (false == ConfiguratorBase.isConnectorInfoSet(AccumuloInputFormat.class, conf)) {
+            try {
+                AccumuloInputFormat.setConnectorInfo(job, user, new PasswordToken(password.getBytes()));
+                AccumuloInputFormat.setScanAuthorizations(job, authorizations);
+                AccumuloInputFormat.setInputTableName(job, table);
+                AccumuloInputFormat.setZooKeeperInstance(job, inst, zookeepers);
+            } catch (AccumuloSecurityException ex) {
+                Logger.getLogger(AbstractAccumuloStorage.class.getName()).log(Level.SEVERE, null, ex);
             }
-            
-            AccumuloInputFormat.setRanges(conf, Collections.singleton(new Range(start, end)));
+            if (columnFamilyColumnQualifierPairs.size() > 0) {
+                LOG.info(String.format("columns: %s", columnFamilyColumnQualifierPairs));
+                AccumuloInputFormat.fetchColumns(job, columnFamilyColumnQualifierPairs);
+            }
+
+            AccumuloInputFormat.setRanges(job, Collections.singleton(new Range(start, end)));
             configureInputFormat(conf);
         }
     }
 
-    protected void configureInputFormat(Configuration conf)
-    {
-    	
+    protected void configureInputFormat(Configuration conf) {
     }
-    
-    protected void configureOutputFormat(Configuration conf)
-    {
-    	
+
+    protected void configureOutputFormat(Configuration conf) {
     }
-    
+
     @Override
-    public String relativeToAbsolutePath(String location, Path curDir) throws IOException
-    {
+    public String relativeToAbsolutePath(String location, Path curDir) throws IOException {
         return location;
     }
 
     @Override
-    public void setUDFContextSignature(String signature)
-    {
-        
+    public void setUDFContextSignature(String signature) {
     }
 
     /* StoreFunc methods */
-    public void setStoreFuncUDFContextSignature(String signature)
-    {
-        
+    @Override
+    public void setStoreFuncUDFContextSignature(String signature) {
     }
 
-    public String relToAbsPathForStoreLocation(String location, Path curDir) throws IOException
-    {
+    @Override
+    public String relToAbsPathForStoreLocation(String location, Path curDir) throws IOException {
         return relativeToAbsolutePath(location, curDir);
     }
-    
-    public void setStoreLocation(String location, Job job) throws IOException
-    {
+
+    @Override
+    public void setStoreLocation(String location, Job job) throws IOException {
         conf = job.getConfiguration();
         setLocationFromUri(location);
-        
-        if(!conf.getBoolean(AccumuloOutputFormat.class.getSimpleName()+".configured", false))
-        {
-        	AccumuloOutputFormat.setOutputInfo(conf, user, password.getBytes(), true, table);
-            AccumuloOutputFormat.setZooKeeperInstance(conf, inst, zookeepers);
-            AccumuloOutputFormat.setMaxLatency(conf, maxLatency);
-            AccumuloOutputFormat.setMaxMutationBufferSize(conf, maxMutationBufferSize);
-            AccumuloOutputFormat.setMaxWriteThreads(conf, maxWriteThreads);
+
+        if (false == ConfiguratorBase.isConnectorInfoSet(AccumuloOutputFormat.class, conf)) {
+            try {
+                BatchWriterConfig batchWriterConfig = new BatchWriterConfig();
+                batchWriterConfig.setMaxLatency(maxLatency, TimeUnit.MINUTES);
+                batchWriterConfig.setMaxMemory(maxMutationBufferSize);
+                batchWriterConfig.setMaxWriteThreads(maxWriteThreads);
+                batchWriterConfig.setTimeout(5, TimeUnit.MINUTES);
+                
+                AccumuloOutputFormat.setConnectorInfo(job, user, new PasswordToken(password.getBytes()));
+                AccumuloOutputFormat.setDefaultTableName(job, table);
+                AccumuloOutputFormat.setZooKeeperInstance(job, inst, zookeepers);
+                AccumuloOutputFormat.setBatchWriterOptions(job, batchWriterConfig);
+            } catch (AccumuloSecurityException ex) {
+                Logger.getLogger(AbstractAccumuloStorage.class.getName()).log(Level.SEVERE, null, ex);
+            }
+
             configureOutputFormat(conf);
         }
     }
 
-    public OutputFormat getOutputFormat()
-    {
+    @Override
+    public OutputFormat getOutputFormat() {
         return new AccumuloOutputFormat();
     }
 
-    public void checkSchema(ResourceSchema schema) throws IOException
-    {
-        // we don't care about types, they all get casted to ByteBuffers
+    @Override
+    public void checkSchema(ResourceSchema schema) throws IOException {
     }
 
-    public void prepareToWrite(RecordWriter writer)
-    {
+    @SuppressWarnings("unchecked")
+    @Override
+    public void prepareToWrite(RecordWriter writer) {
         this.writer = writer;
     }
-    
-    public abstract Collection<Mutation> getMutations(Tuple tuple)throws ExecException, IOException;
 
-    public void putNext(Tuple tuple) throws ExecException, IOException
-    {
-    	Collection<Mutation> muts = getMutations(tuple);
-    	for(Mutation mut : muts)
-    	{
-    		try {
-    			getWriter().write(tableName, mut);
-    		} catch (InterruptedException e) {
-    			throw new IOException(e);
-    		}
-    	}
+    public abstract Collection<Mutation> getMutations(Tuple tuple) throws ExecException, IOException;
+
+    @Override
+    public void putNext(Tuple tuple) throws ExecException, IOException {
+        Collection<Mutation> muts = getMutations(tuple);
+        for (Mutation mut : muts) {
+            try {
+                getWriter().write(tableName, mut);
+            } catch (InterruptedException e) {
+                throw new IOException(e);
+            }
+        }
     }
 
-    public void cleanupOnFailure(String failure, Job job){}
+    @Override
+    public void cleanupOnFailure(String failure, Job job) {
+        // don't do anyhing.
+    }
 }
